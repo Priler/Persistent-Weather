@@ -1,0 +1,161 @@
+-- [ Persistent Weather ]--
+-- caches weather on save, restores on load to prevent random transitions
+-- original by Yohji
+-- re-written & fixed for Anomaly 1.5.3 by Abraham (Priler)
+
+local cached_weather = nil
+local cached_cycle = nil
+local cached_rain_density = nil
+local underground_enter_time = nil
+local first_select = true
+
+local UNDERGROUND_TRANSITION_MS = 10 * 60 * 1000 -- 10 real minutes
+
+-- [ Helpers ]--
+
+local function is_underground()
+    return level_weathers.bLevelUnderground
+end
+
+-- extract cycle name from preset (e.g. "w_clear1" -> "clear")
+local function get_cycle_from_preset(preset)
+    if not preset then return nil end
+    for _, cycle in ipairs({"clear", "partly", "cloudy", "rainy", "stormy", "foggy"}) do
+        if string.find(preset, cycle) then
+            return cycle
+        end
+    end
+    return nil
+end
+
+-- [ WeatherManager Hooks ]--
+
+local original_select_weather = level_weathers.WeatherManager.select_weather
+level_weathers.WeatherManager.select_weather = function(self, now)
+    
+    -- let vanilla handle weather effects (emissions, psi-storms)
+    if self.weather_fx then
+        cached_weather = nil
+        cached_cycle = nil
+        cached_rain_density = nil
+        first_select = false
+        return original_select_weather(self, now)
+    end
+    
+    -- if underground, track time and allow gradual weather transition
+    if is_underground() and cached_weather then
+        if not underground_enter_time then
+            underground_enter_time = time_global()
+        end
+        
+        local ms_underground = time_global() - underground_enter_time
+        
+        if ms_underground > UNDERGROUND_TRANSITION_MS then
+            printdbg("~ persistent_weather: underground for %d sec, allowing transition", ms_underground / 1000)
+            cached_weather = nil
+            cached_cycle = nil
+            cached_rain_density = nil
+            underground_enter_time = nil
+        end
+    end
+    
+    -- on first select after load, inject our cached weather
+    if first_select and cached_weather and not is_underground() then
+        first_select = false
+        
+        printdbg("~ persistent_weather: injecting [%s] cycle [%s] rain [%s]", cached_weather, tostring(cached_cycle), tostring(cached_rain_density))
+        
+        -- inject our values before vanilla runs
+        if cached_cycle then
+            self.cycle = cached_cycle
+        end
+        self.preset = cached_weather
+        
+        -- remember rain density to force after weather is set
+        local rain_to_restore = cached_rain_density
+        
+        -- clear cache
+        cached_weather = nil
+        cached_cycle = nil
+        cached_rain_density = nil
+        underground_enter_time = nil
+        
+        -- let vanilla run with our preset
+        local result = original_select_weather(self, now)
+        
+        -- force rain_density on CurrentEnv directly (like weather editor does)
+        -- this ensures rain sound starts even if lerp hasn't run yet
+        if rain_to_restore and rain_to_restore > 0.01 then
+            weather.set_value_numric("rain_density", rain_to_restore)
+        end
+        
+        return result
+    end
+    
+    first_select = false
+    return original_select_weather(self, now)
+end
+
+local original_load_state = level_weathers.WeatherManager.load_state
+level_weathers.WeatherManager.load_state = function(self, m_data)
+    first_select = true
+    
+    if not m_data then
+        return
+    end
+    
+    local pw = m_data.persistent_weather
+    if pw then
+        cached_weather = pw.preset
+        cached_cycle = pw.cycle
+        cached_rain_density = pw.rain_density
+        
+        if is_underground() then
+            underground_enter_time = time_global()
+        else
+            underground_enter_time = nil
+        end
+        
+        if cached_weather then
+            printdbg("~ persistent_weather: loaded [%s] cycle [%s] rain [%s]", cached_weather, tostring(cached_cycle), tostring(cached_rain_density))
+        end
+    end
+    
+    return original_load_state(self, m_data)
+end
+
+local original_save_state = level_weathers.WeatherManager.save_state
+level_weathers.WeatherManager.save_state = function(self, m_data)
+    original_save_state(self, m_data)
+    
+    if not is_underground() then
+        if level.is_wfx_playing() then
+            if cached_weather then
+                m_data.persistent_weather = {
+                    preset = cached_weather,
+                    cycle = cached_cycle,
+                    rain_density = cached_rain_density
+                }
+            end
+            return
+        end
+        
+        local current = level.get_weather()
+        if current and current ~= "" then
+            m_data.persistent_weather = {
+                preset = current,
+                cycle = self.cycle or get_cycle_from_preset(current),
+                rain_density = level.rain_factor()
+            }
+            printdbg("~ persistent_weather: saved [%s] cycle [%s] rain [%s]", current, tostring(m_data.persistent_weather.cycle), tostring(m_data.persistent_weather.rain_density))
+        end
+    else
+        if cached_weather then
+            m_data.persistent_weather = {
+                preset = cached_weather,
+                cycle = cached_cycle,
+                rain_density = cached_rain_density
+            }
+        end
+    end
+end
