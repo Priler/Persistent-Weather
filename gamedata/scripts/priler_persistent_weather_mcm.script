@@ -1,0 +1,69 @@
+-- [ Persistent Weather MCM ]--
+
+local defaults = {
+    enabled = true,
+    level_change_persist_chance = 0, -- 0-100%
+    level_change_min_delay = 0, -- minutes
+    underground_timeout = 10, -- minutes
+}
+
+function get_config(key)
+    if ui_mcm then
+        return ui_mcm.get("persistent_weather/" .. key)
+    end
+    return defaults[key]
+end
+
+function on_mcm_load()
+    return {
+        id = "persistent_weather",
+        sh = true,
+        gr = {
+            {
+                id = "title",
+                type = "slide",
+                link = "ui_options_slider_player",
+                text = "ui_mcm_persistent_weather_title",
+                size = { 512, 50 },
+                spacing = 20
+            },
+            {
+                id = "enabled",
+                type = "check",
+                val = 1,
+                def = true,
+                hint = "persistent_weather_enabled"
+            },
+            {
+                id = "level_change_persist_chance",
+                type = "track",
+                val = 2,
+                min = 0,
+                max = 100,
+                step = 5,
+                def = 0,
+                hint = "persistent_weather_level_change_persist_chance"
+            },
+            {
+                id = "level_change_min_delay",
+                type = "track",
+                val = 2,
+                min = 0,
+                max = 60,
+                step = 1,
+                def = 0,
+                hint = "persistent_weather_level_change_min_delay"
+            },
+            {
+                id = "underground_timeout",
+                type = "track",
+                val = 2,
+                min = 1,
+                max = 60,
+                step = 1,
+                def = 10,
+                hint = "persistent_weather_underground_timeout"
+            },
+        }
+    }
+end

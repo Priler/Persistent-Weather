@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+	<string id="ui_mcm_persistent_weather_title">
+		<text>Persistent Weather</text>
+	</string>
+	
+	<string id="ui_mcm_menu_persistent_weather">
+		<text>Persistent Weather</text>
+	</string>
+	
+	<string id="ui_mcm_persistent_weather_enabled">
+		<text>Enable Mod</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_enabled_desc">
+		<text>Enable persistent weather system. Weather will be saved and restored when loading saves.</text>
+	</string>
+	
+	<string id="ui_mcm_persistent_weather_level_change_persist_chance">
+		<text>Level Change Persist Chance (%)</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_level_change_persist_chance_desc">
+		<text>Chance (0-100%) to keep the same weather when traveling to a new location. At 0% weather always changes on level transition (vanilla behavior). At 100% weather always persists.</text>
+	</string>
+	
+	<string id="ui_mcm_persistent_weather_level_change_min_delay">
+		<text>Level Change Min Delay (minutes)</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_level_change_min_delay_desc">
+		<text>Minimum in-game time (in minutes) that must pass before weather can change on level transition. If you travel between levels faster than this, weather always persists. Set to 0 to disable.</text>
+	</string>
+	
+	<string id="ui_mcm_persistent_weather_underground_timeout">
+		<text>Underground Timeout (minutes)</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_underground_timeout_desc">
+		<text>How long (in real minutes) you can stay underground before weather is allowed to change. Default: 10 minutes.</text>
+	</string>
+</string_table>
