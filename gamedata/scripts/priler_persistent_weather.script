@@ -215,18 +215,18 @@ level_weathers.WeatherManager.select_weather = function(self, now)
         cached_cycle = nil
         underground_enter_time = nil
         
-        -- delay weather restoration to give engine time to fully initialize
-        -- this helps with vanilla rain sound bug
-        CreateTimeEvent("persistent_weather", "restore", 0.3, function()
-            printdbg("~ persistent_weather: restoring [%s] cycle [%s]", target_weather, tostring(target_cycle))
-            level.set_weather(target_weather, true)
-            self.weather_file = target_weather
-            if target_cycle then
-                self.cycle = target_cycle
-            end
-            self:set_brightness_boosts()
-            
-            -- start rain sound fallback monitor
+        -- set weather IMMEDIATELY to prevent nil window (other mods may query weather)
+        level.set_weather(target_weather, true)
+        self.weather_file = target_weather
+        if target_cycle then
+            self.cycle = target_cycle
+        end
+        self:set_brightness_boosts()
+        
+        printdbg("~ persistent_weather: restored [%s] cycle [%s]", target_weather, tostring(target_cycle))
+        
+        -- start rain sound fallback monitor (slightly delayed to let engine catch up)
+        CreateTimeEvent("persistent_weather", "rain_monitor", 0.3, function()
             start_rain_sound_monitor()
             return true
         end)
