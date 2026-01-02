@@ -35,4 +35,18 @@
 	<string id="ui_mcm_persistent_weather_underground_timeout_desc">
 		<text>How long (in real minutes) you can stay underground before weather is allowed to change. Default: 10 minutes.</text>
 	</string>
+	
+	<string id="ui_mcm_persistent_weather_replace_rain_sound">
+		<text>Replace Rain Sound Handling</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_replace_rain_sound_desc">
+		<text>Take over rain sound from the engine completely. Requires replacing vanilla rain.ogg with silent file (optional during installation). Fixes rain sound issues after save/load. When disabled, fallback mode is used instead (only activates when engine sound fails).</text>
+	</string>
+	
+	<string id="ui_mcm_persistent_weather_debug_mode">
+		<text>Debug Mode</text>
+	</string>
+	<string id="ui_mcm_persistent_weather_debug_mode_desc">
+		<text>Print debug messages to console. Useful for troubleshooting issues.</text>
+	</string>
 </string_table>

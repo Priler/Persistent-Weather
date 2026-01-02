@@ -25,8 +25,16 @@ local function get_config(key)
         level_change_persist_chance = 0,
         level_change_min_delay = 0,
         underground_timeout = 10,
+        replace_rain_sound = false,
+        debug_mode = false,
     }
     return defaults[key]
+end
+
+local function dbg(fmt, ...)
+    if get_config("debug_mode") then
+        printf("~ pw: " .. fmt, ...)
+    end
 end
 
 local function get_underground_timeout_ms()
@@ -57,56 +65,61 @@ local function get_cycle_from_preset(preset)
     return nil
 end
 
--- [ Rain Sound Fallback ]--
--- vanilla CEffect_Rain sound is buggy after load
--- we detect if rain should play but engine sound is stuck, and play our own
+-- [ Rain Sound System ]--
+-- Two modes:
+-- 1. Fallback mode (default): detect when engine sound dies, play our own
+-- 2. Replacement mode (MCM option): take over rain sound completely (requires silent rain.ogg)
+
+local rain_sound = nil
+local rain_sound_started = false
+local rain_check_count = 0
+local current_volume = 0
+local FADE_SPEED = 2.0  -- how fast volume fades (higher = faster)
+local RAIN_SOUND_PATH = "ambient\\pw_rain"  -- our own file, doesn't conflict with engine
+local sound_start_time = 0  -- when sound was started (for health check grace period)
 
 local function stop_rain_sound()
     if rain_sound then
         if rain_sound:playing() then
             rain_sound:stop()
+            dbg("rain sound stopped")
         end
         rain_sound = nil
     end
     rain_sound_started = false
-end
-
-local function try_play_rain_sound(sound_path)
-    local snd = sound_object(sound_path)
-    if snd then
-        snd:play(db.actor, 0, sound_object.s2d + sound_object.looped)
-        snd.volume = 0.6
-        return snd
-    end
-    return nil
+    current_volume = 0
+    sound_start_time = 0
 end
 
 local function start_rain_sound()
-    if rain_sound_started then
-        return -- already started
+    if rain_sound_started then return end
+    if not db.actor then
+        dbg("ERROR - cannot start rain sound, no actor")
+        return
     end
     
-    -- try different possible rain sound paths
-    local paths = {
-        "ambient\\rain",
-        "ambient\\rain_ambient",
-        "ambient\\soundscape\\weather\\rain",
-        "nature\\rain",
-    }
-    
-    for _, path in ipairs(paths) do
-        rain_sound = try_play_rain_sound(path)
-        if rain_sound then
-            rain_sound_started = true
-            printf("~ pw: started fallback rain sound [%s]", path)
-            return
-        end
+    local snd = sound_object(RAIN_SOUND_PATH)
+    if not snd then
+        dbg("ERROR - could not create sound object [%s]", RAIN_SOUND_PATH)
+        return
     end
     
-    printf("~ pw: could not find rain sound file")
+    snd:play(db.actor, 0, sound_object.s2d + sound_object.looped)
+    snd.volume = 0.01
+    
+    rain_sound = snd
+    rain_sound_started = true
+    sound_start_time = time_global()
+    dbg("rain sound started [%s]", RAIN_SOUND_PATH)
 end
 
-local function update_rain_sound()
+-- fallback mode: only activate when engine sound is stuck
+local function update_rain_sound_fallback()
+    -- don't run fallback if replacement mode is active
+    if get_config("replace_rain_sound") then
+        return true -- stop timer
+    end
+    
     if is_underground() then
         stop_rain_sound()
         rain_check_count = 0
@@ -120,53 +133,126 @@ local function update_rain_sound()
     if rain_density < 0.2 then
         stop_rain_sound()
         rain_check_count = 0
-        return true -- stop monitoring, no rain
+        return true -- stop monitoring
     end
     
     rain_check_count = rain_check_count + 1
     
-    -- engine sound is working fine
+    -- engine sound working fine
     if rain_volume >= 0.2 then
         if rain_sound_started then
-            printf("~ pw: engine rain sound working, stopping fallback")
             stop_rain_sound()
         end
-        -- engine works, stop monitoring after a few successful checks
         if rain_check_count > 10 then
-            printf("~ pw: engine rain sound confirmed, stopping monitor")
-            return true -- stop monitoring
+            return true -- confirmed working, stop monitoring
         end
-        return false -- keep checking a bit more to be sure
+        return false -- keep checking
     end
     
-    -- rain expected but volume stuck - wait a few checks then activate fallback
+    -- rain expected but volume stuck
     if rain_check_count > 6 then
         if not rain_sound_started then
-            printf("~ pw: engine rain sound stuck (dens=%s vol=%s), using fallback", tostring(rain_density), tostring(rain_volume))
             start_rain_sound()
         end
-        -- adjust volume based on density
         if rain_sound and rain_sound:playing() then
             rain_sound.volume = math.min(rain_density * 0.7, 0.8)
         end
     end
     
-    return false -- keep monitoring while fallback is active
+    return false -- keep monitoring
 end
 
 local function on_rain_sound_timer()
-    if not db.actor then
-        return false
-    end
-    local should_stop = update_rain_sound()
-    return should_stop -- true = stop timer, false = keep running
+    if not db.actor then return false end
+    
+    -- timer only used for fallback mode now
+    -- replacement mode uses actor_on_update
+    return update_rain_sound_fallback()
 end
 
 local function start_rain_sound_monitor()
     rain_check_count = 0
-    -- check every 0.5 seconds
     RemoveTimeEvent("persistent_weather", "rain_sound")
-    CreateTimeEvent("persistent_weather", "rain_sound", 0.5, on_rain_sound_timer)
+    local interval = 0.5
+    dbg("starting rain monitor (fallback mode)")
+    CreateTimeEvent("persistent_weather", "rain_sound", interval, on_rain_sound_timer)
+end
+
+-- replacement mode: runs every frame via actor_on_update
+local function on_actor_update()
+    if not get_config("replace_rain_sound") then return end
+    if not db.actor then return end  -- actor not ready yet
+    
+    local rain_factor = level.rain_factor()
+    local rain_volume = level.get_rain_volume()
+    
+    -- warmup fix: engine's hemi_factor needs time to stabilize after load
+    -- if volume is suspiciously low compared to rain_factor, override it
+    -- this happens for ~2-3 seconds after load while hemi_factor lerps up
+    if rain_factor > 0.1 and rain_volume < rain_factor * 0.3 then
+        rain_volume = rain_factor * 0.6  -- reasonable outdoor volume
+    end
+    
+    -- determine target volume
+    local target_volume = 0
+    if not is_underground() and rain_factor >= 0.01 then
+        target_volume = rain_volume
+    end
+    
+    -- start sound if needed
+    if target_volume > 0 and not rain_sound_started then
+        dbg("replacement mode - starting rain (factor=%s, vol=%s)", tostring(rain_factor), tostring(target_volume))
+        start_rain_sound()
+        if not rain_sound_started then
+            return
+        end
+        current_volume = 0.01
+    end
+    
+    -- health check: if sound should be playing but died, restart it
+    -- only check after 500ms grace period (playing() returns false right after play())
+    if rain_sound_started and target_volume > 0 then
+        local time_since_start = time_global() - sound_start_time
+        if time_since_start > 500 then
+            if not rain_sound or not rain_sound:playing() then
+                dbg("sound died unexpectedly, restarting...")
+                rain_sound_started = false
+                rain_sound = nil
+                start_rain_sound()
+                if rain_sound_started then
+                    current_volume = target_volume  -- restore volume immediately
+                end
+                return
+            end
+        end
+    end
+    
+    -- smooth volume transition
+    if rain_sound_started and rain_sound then
+        local diff = target_volume - current_volume
+        
+        if math.abs(diff) < 0.01 then
+            current_volume = target_volume
+        else
+            -- lerp towards target
+            local delta = device().time_delta / 1000  -- convert ms to seconds
+            current_volume = current_volume + diff * FADE_SPEED * delta
+            current_volume = math.max(0, math.min(1, current_volume))  -- clamp 0-1
+        end
+        
+        rain_sound.volume = current_volume
+        
+        -- stop sound after fade out completes
+        if current_volume < 0.01 and target_volume == 0 then
+            stop_rain_sound()
+            current_volume = 0
+        end
+    end
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_update", on_actor_update)
+    dbg("registered rain sound callbacks")
 end
 
 -- [ WeatherManager Hooks ]--
@@ -225,11 +311,13 @@ level_weathers.WeatherManager.select_weather = function(self, now)
         
         printdbg("~ persistent_weather: restored [%s] cycle [%s]", target_weather, tostring(target_cycle))
         
-        -- start rain sound fallback monitor (slightly delayed to let engine catch up)
-        CreateTimeEvent("persistent_weather", "rain_monitor", 0.3, function()
-            start_rain_sound_monitor()
-            return true
-        end)
+        -- start rain sound fallback monitor (only if not using replacement mode)
+        if not get_config("replace_rain_sound") then
+            CreateTimeEvent("persistent_weather", "rain_monitor", 0.3, function()
+                start_rain_sound_monitor()
+                return true
+            end)
+        end
         
         return -- early return like original mod
     end
@@ -248,8 +336,10 @@ level_weathers.WeatherManager.select_weather = function(self, now)
         end)
     end
     
-    -- start rain sound fallback monitor for vanilla loads too
-    start_rain_sound_monitor()
+    -- start rain sound fallback monitor for vanilla loads too (only if not using replacement mode)
+    if not get_config("replace_rain_sound") then
+        start_rain_sound_monitor()
+    end
     
     return original_select_weather(self, now)
 end

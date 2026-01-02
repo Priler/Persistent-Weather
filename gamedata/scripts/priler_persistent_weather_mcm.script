@@ -5,6 +5,8 @@ local defaults = {
     level_change_persist_chance = 0, -- 0-100%
     level_change_min_delay = 0, -- minutes
     underground_timeout = 10, -- minutes
+    replace_rain_sound = false, -- take over rain sound from engine
+    debug_mode = false, -- print debug messages to console
 }
 
 function get_config(key)
@@ -63,6 +65,21 @@ function on_mcm_load()
                 step = 1,
                 def = 10,
                 hint = "persistent_weather_underground_timeout"
+            },
+            { id = "divider", type = "line" },
+            {
+                id = "replace_rain_sound",
+                type = "check",
+                val = 1,
+                def = false,
+                hint = "persistent_weather_replace_rain_sound"
+            },
+            {
+                id = "debug_mode",
+                type = "check",
+                val = 1,
+                def = false,
+                hint = "persistent_weather_debug_mode"
             },
         }
     }
