@@ -33,7 +33,8 @@ end
 
 local function dbg(fmt, ...)
     if get_config("debug_mode") then
-        printf("~ pw: " .. fmt, ...)
+        local msg = string.format(fmt, ...)
+        printf("~ pw: " .. msg)
     end
 end
 
@@ -94,18 +95,18 @@ end
 local function start_rain_sound()
     if rain_sound_started then return end
     if not db.actor then
-        dbg("ERROR - cannot start rain sound, no actor")
+        printf("~ pw: ERROR - cannot start rain sound, no actor")
         return
     end
     
     local snd = sound_object(RAIN_SOUND_PATH)
     if not snd then
-        dbg("ERROR - could not create sound object [%s]", RAIN_SOUND_PATH)
+        printf("~ pw: ERROR - could not create sound object [%s]", RAIN_SOUND_PATH)
         return
     end
     
     snd:play(db.actor, 0, sound_object.s2d + sound_object.looped)
-    snd.volume = 0.01
+    snd.volume = 0.5  -- start at audible volume for debugging
     
     rain_sound = snd
     rain_sound_started = true
@@ -206,7 +207,11 @@ local function on_actor_update()
         if not rain_sound_started then
             return
         end
-        current_volume = 0.01
+        current_volume = 0.5  -- match start_rain_sound initial volume
+        -- verify sound is actually playing
+        if rain_sound then
+            dbg("sound check after start: playing=%s volume=%.2f", tostring(rain_sound:playing()), rain_sound.volume)
+        end
     end
     
     -- health check: if sound should be playing but died, restart it
@@ -240,6 +245,13 @@ local function on_actor_update()
             current_volume = math.max(0, math.min(1, current_volume))  -- clamp 0-1
         end
         
+        -- debug: log volume every ~1 second
+        if not _pw_last_vol_log then _pw_last_vol_log = 0 end
+        if time_global() - _pw_last_vol_log > 1000 then
+            dbg("volume: current=%.2f target=%.2f playing=%s", current_volume, target_volume, tostring(rain_sound:playing()))
+            _pw_last_vol_log = time_global()
+        end
+        
         rain_sound.volume = current_volume
         
         -- stop sound after fade out completes
@@ -250,9 +262,28 @@ local function on_actor_update()
     end
 end
 
+local function reset_rain_sound_state()
+    if rain_sound then
+        if rain_sound:playing() then
+            rain_sound:stop()
+        end
+        rain_sound = nil
+    end
+    rain_sound_started = false
+    current_volume = 0
+    sound_start_time = 0
+end
+
 function on_game_start()
     RegisterScriptCallback("actor_on_update", on_actor_update)
-    dbg("registered rain sound callbacks")
+    RegisterScriptCallback("actor_on_first_update", reset_rain_sound_state)
+    
+    -- clean up any leftover sound from previous session
+    reset_rain_sound_state()
+    
+    printf("~ pw: initialized (replace_rain_sound=%s, debug=%s)", 
+        tostring(get_config("replace_rain_sound")), 
+        tostring(get_config("debug_mode")))
 end
 
 -- [ WeatherManager Hooks ]--
